@@ -10,7 +10,7 @@ Depends on Python3, ProgressBar, and pathos.
 import bisect
 import itertools
 import random
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Sequence
 from typing import Any
 
 # custom modules
@@ -28,8 +28,8 @@ class GA:
 
     def __init__(
         self,
-        population: Collection[constants.Individual],
-        eval_func: Callable[[Collection[str]], int | float],
+        population: Sequence[constants.Individual],
+        eval_func: Callable[[constants.Individual], float],
         params: dict[str, Any],
         stats: Stats,
     ) -> None:
@@ -37,9 +37,9 @@ class GA:
 
         Parameters
         ----------
-        population : Collection[constants.Individual]
+        population : Sequence[constants.Individual]
             The initial population.
-        eval_func : Callable[[constants.Individual], Union[int, float]]
+        eval_func : Callable[[constants.Individual], float]
             The fitness evaluation function.
         params : dict[str, Any]
             Runtime configuration parameters.
@@ -57,30 +57,23 @@ class GA:
         )
 
     def _get_mating_pool_size(self) -> int:
-        """Return the required size of the mating pool based on the selection type
-        and population size.
+        """Return the required size of the mating pool based on the population size.
+
+        Every crossover strategy produces two children per pair of parents, so the
+        pool needs as many parents as there are children, rounded up to an even
+        number so that every parent has a mate.
 
         Returns
         -------
         int
             The size of the mating pool.
         """
-        selection_type = self.params["selection_type"]
         population_size = self.params["population_size"]
-        if selection_type == constants.SelectionType.TS:
-            # for selection types which return one child,
-            # we need to double the size of the mating pool
-            mating_pool_size = population_size * 2
-        else:
-            # selection types which return two children need
-            # exactly as many parents as children
-            mating_pool_size = population_size
-
-        return mating_pool_size
+        return population_size + population_size % 2
 
     def _get_mating_pool(
         self, pool_size: int, selection_type: constants.SelectionType
-    ) -> Collection[constants.Individual]:
+    ) -> list[constants.Individual]:
         """Get the mating pool based on the selection type.
 
         Parameters
@@ -92,7 +85,7 @@ class GA:
 
         Returns
         -------
-        Collection[constants.Individual]
+        list[constants.Individual]
             The individuals selected for mating.
 
         Raises
@@ -193,6 +186,24 @@ class GA:
 
         return child1, child2
 
+    @staticmethod
+    def _filled(child: list[str | None]) -> constants.Individual:
+        """Convert a fully-populated working list into an individual.
+
+        Parameters
+        ----------
+        child : list[str | None]
+            The child genes, with None marking slots not yet filled.
+
+        Returns
+        -------
+        constants.Individual
+            The child as an individual.
+        """
+        genes = tuple(gene for gene in child if gene is not None)
+        assert len(genes) == len(child), "crossover left unfilled genes"
+        return genes
+
     def _crossover_partially_mapped(
         self, parent1: constants.Individual, parent2: constants.Individual
     ) -> tuple[constants.Individual, constants.Individual]:
@@ -213,7 +224,7 @@ class GA:
         crossover_point1 = random.randint(0, len(parent1) - 1)
         crossover_point2 = random.randint(crossover_point1 + 1, len(parent1))
 
-        child1 = [None] * len(parent1)
+        child1: list[str | None] = [None] * len(parent1)
         child1[crossover_point1:crossover_point2] = parent1[
             crossover_point1:crossover_point2
         ]
@@ -234,7 +245,7 @@ class GA:
                 child1[i] = unused[pos]
                 pos += 1
 
-        child2 = [None] * len(parent1)
+        child2: list[str | None] = [None] * len(parent1)
         child2[crossover_point1:crossover_point2] = parent2[
             crossover_point1:crossover_point2
         ]
@@ -255,12 +266,15 @@ class GA:
                 child2[i] = unused[pos]
                 pos += 1
 
-        return child1, child2
+        return self._filled(child1), self._filled(child2)
 
     def _crossover_edge_recombination(
         self, parent1: constants.Individual, parent2: constants.Individual
-    ) -> tuple[constants.Individual, ...]:
+    ) -> tuple[constants.Individual, constants.Individual]:
         """Edge recombination crossover.
+
+        Edge recombination produces a single child, so it is applied once with each
+        parent order to produce two offspring like the other crossover strategies.
 
         Parameters
         ----------
@@ -271,7 +285,29 @@ class GA:
 
         Returns
         -------
-        tuple[constants.Individual, ...]
+        tuple[constants.Individual, constants.Individual]
+            The two offspring.
+        """
+        return (
+            self._edge_recombination_child(parent1, parent2),
+            self._edge_recombination_child(parent2, parent1),
+        )
+
+    def _edge_recombination_child(
+        self, parent1: constants.Individual, parent2: constants.Individual
+    ) -> constants.Individual:
+        """Produce one child by edge recombination.
+
+        Parameters
+        ----------
+        parent1 : constants.Individual
+            The first parent.
+        parent2 : constants.Individual
+            The second parent.
+
+        Returns
+        -------
+        constants.Individual
             The offspring.
         """
         adj1 = {
@@ -287,7 +323,7 @@ class GA:
             for i in range(len(parent1))
         }
 
-        child = []
+        child: list[str] = []
         n = random.choice([parent1[0], parent2[0]])
         while True:
             child.append(n)
@@ -316,12 +352,12 @@ class GA:
                     nxt = random.choice(parent1)
             n = nxt
 
-        return [child]
+        return tuple(child)
 
     def _crossover(
         self, parent1: constants.Individual, parent2: constants.Individual
-    ) -> tuple[constants.Individual, ...]:
-        """Mate two individuals to create offsprint.
+    ) -> tuple[constants.Individual, constants.Individual]:
+        """Mate two individuals to create offspring.
 
         Parameters
         ----------
@@ -332,8 +368,8 @@ class GA:
 
         Returns
         -------
-        tuple[constants.Individual, ...]
-            The offspring.
+        tuple[constants.Individual, constants.Individual]
+            The two offspring.
         """
         if random.random() > self.params["crossover_rate"]:
             return parent1, parent2
@@ -404,7 +440,7 @@ class GA:
         for p in points:
             while self.population.sum_fitness[i] < p:
                 i += 1
-            mating_pool.append(self.population.population[i]["individual"])
+            mating_pool.append(self.population.population[i])
 
         return mating_pool
 
@@ -423,15 +459,15 @@ class GA:
         """
         mating_pool = []
         population_size = self.params["population_size"]
-        for i in range(mating_pool_size):
+        for _ in range(mating_pool_size):
             tournament_size = self.params["tournament_size"]
             contenders = random.sample(range(population_size), tournament_size)
             fit = self.population.fitness[contenders[0]]
-            parent = self.population.population[contenders[0]]["individual"]
+            parent = self.population.population[contenders[0]]
             for i in range(1, tournament_size):
                 if self.population.fitness[contenders[i]] > fit:
                     fit = self.population.fitness[contenders[i]]
-                    parent = self.population.population[contenders[i]]["individual"]
+                    parent = self.population.population[contenders[i]]
             mating_pool.append(parent)
 
         return mating_pool
@@ -459,7 +495,7 @@ class GA:
         Returns
         -------
         list[constants.Individual]
-            _description_
+            The (possibly mutated) offspring.
         """
         return [
             self.population.mutate(child, mutation_type, mutation_rate)
@@ -490,6 +526,7 @@ class GA:
         """
         # grab some settings to avoid repeated lookups
         max_generations = self.params["max_generations"]
+        population_size = self.params["population_size"]
         mutation_type = self.params["mutation_type"]
         mutation_rate = self.params["mutation_rate"]
         mating_pool_size = self._get_mating_pool_size()
@@ -539,9 +576,12 @@ class GA:
                                 mutation_rate,
                             )
                         )
-                # Wait for mating to complete and collect the results in a list
+                # Wait for mating to complete and collect the results in a list.
+                # An odd population size leaves one extra child, which is dropped.
                 self.population.replace_and_evaluate(
-                    list(itertools.chain(*[res.get() for res in results]))
+                    list(itertools.chain(*[res.get() for res in results]))[
+                        :population_size
+                    ]
                 )
             else:
                 population = []
@@ -555,7 +595,8 @@ class GA:
                             parent1, parent2, mutation_type, mutation_rate
                         )
                     )
-                self.population.replace_and_evaluate(population)
+                # An odd population size leaves one extra child, which is dropped.
+                self.population.replace_and_evaluate(population[:population_size])
                 if not display_progress:
                     self.population.display_stats()
             if convergence_termination is not None and generation > min_generations:

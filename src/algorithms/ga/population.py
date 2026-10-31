@@ -9,7 +9,7 @@ Includes the evaluation, mutation, and statistics collection methods.
 # standard library modules
 import itertools
 import random
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Sequence
 from math import inf
 
 # custom modules
@@ -22,84 +22,89 @@ class Population:
 
     def __init__(
         self,
-        initial_population: Collection[constants.Individual],
-        evaluation_function: Callable[[constants.Individual], int | float],
+        initial_population: Sequence[constants.Individual],
+        evaluation_function: Callable[[constants.Individual], float],
         *,
         stats: Stats | None = None,
         min_length: int | None = 1,
-        max_length: int | None = inf,
-    ):
+        max_length: float | None = inf,
+    ) -> None:
         """Initialize the population.
 
         Parameters
         ----------
-        initial_population : Collection[constants.Individual]
+        initial_population : Sequence[constants.Individual]
             The initial (generation) 0 population.
-        evaluation_function : Callable[[constants.Individual], Union[int, float]]
+        evaluation_function : Callable[[constants.Individual], float]
              The fitness evaluation function.
-        stats : Optional[Stats], optional
+        stats : Stats | None, optional
              Record-keeping, by default None.
-        min_length : Optional[int], optional
+        min_length : int | None, optional
             The minimum number of genes an individual may have, by default 1.
-        max_length : Optional[int], optional
+        max_length : float | None, optional
             The maximum number of genes an individual may have, by default inf.
         """
         self._population = initial_population
         self._eval_func = evaluation_function
         self._stats = stats
-        self._fitness = None
-        self._sum_fitness = None
-        self._custom_mutations = []
+        self._fitness: list[float] = []
+        self._sum_fitness: list[float] = []
+        self._custom_mutations: list[
+            Callable[[constants.Individual], constants.Individual]
+        ] = []
         self._min_length = min_length if min_length else 1
         self._max_length = max_length if max_length else inf
         self.evaluate()
 
     @property
-    def population(self) -> Collection[constants.Individual]:
+    def population(self) -> Sequence[constants.Individual]:
         """The current population."""
         return self._population
 
     @population.setter
-    def population(self, population: Collection[constants.Individual]) -> None:
-        self._population = None
-        self._fitness = None
-        self._sum_fitness = None
+    def population(self, population: Sequence[constants.Individual]) -> None:
         self.replace_and_evaluate(population)
 
     @property
-    def fitness(self):
+    def fitness(self) -> list[float]:
+        """The fitness values for the current population, in population order."""
         return self._fitness
 
     @property
-    def sum_fitness(self):
+    def sum_fitness(self) -> list[float]:
+        """The cumulative sum of the fitness values, in population order."""
         return self._sum_fitness
 
     @property
-    def total_fitness(self):
+    def total_fitness(self) -> float:
+        """The sum of all fitness values (0.0 for an empty population)."""
         if self.sum_fitness:
             return self.sum_fitness[-1]
-        return None
+        return 0.0
 
     @property
-    def convergence_count(self):
+    def convergence_count(self) -> int:
+        """Consecutive generations without fitness change (0 when stats aren't
+        being collected).
+        """
+        if self._stats is None:
+            return 0
         return self._stats.convergence_count
 
     def clear_population(self) -> None:
         """Clears the current population and fitness values. Statistics are not
         modified.
         """
-        self._population = None
-        self._fitness = None
-        self._sum_fitness = None
+        self._population = []
+        self._fitness = []
+        self._sum_fitness = []
 
-    def replace_and_evaluate(
-        self, population: Collection[constants.Individual]
-    ) -> None:
+    def replace_and_evaluate(self, population: Sequence[constants.Individual]) -> None:
         """Replace and evaluate the population.
 
         Parameters
         ----------
-        population : Collection[constants.Individual]
+        population : Sequence[constants.Individual]
             The new population.
         """
         self._population = population
@@ -107,19 +112,19 @@ class Population:
             assert type(individual) is tuple
         self.evaluate()
 
-    def _set_raw_fitness_stats(self, raw_fitness: Collection[int | float]) -> None:
+    def _set_raw_fitness_stats(self, raw_fitness: Collection[float]) -> None:
         """Collects statistics on the given raw fitness values.
 
         Parameters
         ----------
-        raw_fitness : Collection[Union[int, float]]
+        raw_fitness : Collection[float]
             The raw fitness values for the entire population.
         """
         if self._stats is None:
             return
         self._stats.update(raw_fitness, self.population)
 
-    def _get_raw_fitness(self) -> list[int | float]:
+    def _get_raw_fitness(self) -> list[float]:
         """Raw fitness values returned the the evaluation function.
 
         Note
@@ -130,7 +135,7 @@ class Population:
 
         Returns
         -------
-        list[Union[int, float]]
+        list[float]
             The raw fitness values.
         """
         raw_fitness = [self._eval_func(individual) for individual in self.population]
@@ -277,11 +282,15 @@ class Population:
             individual = individual[:i] + individual[i + 1 :]
         return individual
 
-    def _mutate_replicate_segment(self, individual):
+    def _mutate_replicate_segment(
+        self, individual: constants.Individual
+    ) -> constants.Individual:
         # TODO: Basically the same as replicate gene, but for a range
         raise NotImplementedError()
 
-    def _mutate_delete_segment(self, individual):
+    def _mutate_delete_segment(
+        self, individual: constants.Individual
+    ) -> constants.Individual:
         # TODO: Basically the same as delete gene, but for a range
         raise NotImplementedError()
 
@@ -299,8 +308,11 @@ class Population:
 
     def display_stats(self) -> None:
         """Print current population statistics to the console."""
+        if self._stats is None:
+            return
         print(
-            f"Best fitness: {self._stats.best_fitness_per_generation[-1]}, Average fitness: {self._stats.average_fitness_per_generation[-1]}"
+            f"Best fitness: {self._stats.best_fitness_per_generation[-1]}, "
+            f"Average fitness: {self._stats.average_fitness_per_generation[-1]}"
         )
 
     def mutate(
