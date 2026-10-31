@@ -13,9 +13,21 @@ dependencies = [
 [dependency-groups]
 dev = [
     "ipython>=9.18.0",
+    "pytest>=9.2.0",
 ]
 
 [tool.ruff]
 target-version = "py314"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]   # pycodestyle, pyflakes, isort, pyupgrade, bugbear
+
+[tool.pyright]
+pythonVersion = "3.14"
+venvPath = "."
+venv = ".venv"
+extraPaths = ["src/algorithms/ga"]
+typeCheckingMode = "standard"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src/algorithms/ga"]
